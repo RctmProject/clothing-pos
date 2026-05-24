@@ -300,65 +300,159 @@ function CheckoutModal({ cart, cd, onConfirm, onClose, saving }) {
 function ReceiptModal({ sale, onClose }) {
   if (!sale) return null;
 
-  const handlePrint = () => {
-    const w = window.open("", "_blank", "width=400,height=600");
+  // Build receipt lines for 58mm paper (32 chars wide)
+  const buildReceiptLines = () => {
+    const W = 32;
+    const center = (t) => { const p = Math.max(0, Math.floor((W - t.length) / 2)); return " ".repeat(p) + t; };
+    const row = (l, r) => { const space = Math.max(1, W - l.length - r.length); return l + " ".repeat(space) + r; };
+    const divider = "-".repeat(W);
+    const date = new Date(sale.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+    const lines = [
+      center("WHITE EAGLE"),
+      center("Al Nisr Al Abyad Readymade"),
+      center("Garments Trading"),
+      divider,
+      center("Budaniq Area, Near Megamall"),
+      center("Sharjah UAE"),
+      center("+971 54 5666 177"),
+      divider,
+      row(sale.txn_id, date.split(",")[0]),
+      row("Time:", date.split(",")[1]?.trim() || ""),
+      sale.customer_name !== "Walk-in" ? row("Customer:", sale.customer_name) : null,
+      sale.customer_mobile ? row("Mobile:", sale.customer_mobile) : null,
+      row("Payment:", sale.payment_method),
+      divider,
+      ...(sale.items?.map(it => row(`${it.name} x${it.qty}`, fmt(it.line_total))) || []),
+      divider,
+      ...(sale.discount > 0 ? [row("Discount:", "-" + fmt(sale.discount))] : []),
+      row("TOTAL:", fmt(sale.total)),
+      divider,
+      center("Thank you for shopping at"),
+      center("WHITE EAGLE!"),
+      "",
+    ].filter(l => l !== null);
+
+    return lines.join("\n");
+  };
+
+  // Open 58mm optimized receipt page — works with FunPrint share
+  const handleShareFunPrint = () => {
+    const receiptText = buildReceiptLines();
+    const w = window.open("", "_blank", "width=320,height=700");
     w.document.write(`
-      <html><head><title>Receipt</title>
-      <style>
-        body{font-family:monospace;font-size:12px;width:58mm;margin:0 auto;padding:8px}
-        .center{text-align:center}.bold{font-weight:bold}.line{border-top:1px dashed #000;margin:6px 0}
-        .row{display:flex;justify-content:space-between;margin-bottom:3px}
-        .big{font-size:16px;font-weight:bold}.small{font-size:10px}
-      </style></head><body>
-      <div class="center bold big">${SHOP.name}</div>
-      <div class="center small">${SHOP.legal}</div>
-      <div class="line"></div>
-      <div class="center small">${SHOP.address}</div>
-      <div class="center small">${SHOP.phone}</div>
-      <div class="line"></div>
-      <div class="row"><span>${sale.txn_id}</span><span>${new Date(sale.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span></div>
-      ${sale.customer_name !== "Walk-in" ? `<div class="row"><span>Customer:</span><span>${sale.customer_name}</span></div>` : ""}
-      ${sale.customer_mobile ? `<div class="row"><span>Mobile:</span><span>${sale.customer_mobile}</span></div>` : ""}
-      <div class="row"><span>Payment:</span><span>${sale.payment_method}</span></div>
-      <div class="line"></div>
-      ${sale.items?.map(it => `<div class="row"><span>${it.emoji} ${it.name} x${it.qty}</span><span>${fmt(it.line_total)}</span></div>`).join("")}
-      <div class="line"></div>
-      ${sale.discount > 0 ? `<div class="row"><span>Discount:</span><span>-${fmt(sale.discount)}</span></div>` : ""}
-      <div class="row bold"><span>TOTAL:</span><span>${fmt(sale.total)}</span></div>
-      <div class="line"></div>
-      <div class="center small">Thank you for shopping at ${SHOP.name}!</div>
-      </body></html>
+      <html>
+      <head>
+        <title>Receipt ${sale.txn_id}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body {
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px;
+            font-family: 'Courier New', Courier, monospace;
+          }
+          .receipt {
+            width: 220px;
+            font-size: 11px;
+            line-height: 1.5;
+            white-space: pre;
+            color: #000;
+            background: #fff;
+            padding: 8px 4px;
+          }
+          .hint {
+            margin-top: 20px;
+            font-family: sans-serif;
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+            max-width: 280px;
+            line-height: 1.6;
+          }
+          .share-btn {
+            margin-top: 16px;
+            padding: 12px 28px;
+            background: #1A1917;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: sans-serif;
+          }
+          @media print {
+            .hint, .share-btn { display: none; }
+            body { padding: 0; }
+            .receipt { width: 58mm; font-size: 10px; }
+            @page { margin: 0; size: 58mm auto; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="receipt" id="receipt">${receiptText}</div>
+        <div class="hint">
+          📱 <strong>To print with FunPrint:</strong><br>
+          Tap the Share button (↑) in your browser<br>
+          → Select <strong>FunPrint</strong> from the list<br>
+          → Print on 58mm roll
+        </div>
+        <button class="share-btn" onclick="window.print()">🖨 Print / Share</button>
+      </body>
+      </html>
     `);
     w.document.close();
-    w.print();
   };
 
   return (
     <Modal show onClose={onClose}>
       <h3 style={{ color: "#3A7D44" }}>✓ Sale Complete!</h3>
-      <div className="rbk">
-        <div style={{ textAlign: "center", marginBottom: 8 }}>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>{SHOP.name}</div>
-          <div style={{ fontSize: 10, color: "#7A7870" }}>{SHOP.legal}</div>
+
+      {/* Receipt preview */}
+      <div className="rbk" style={{ fontFamily: "'Courier New', monospace", fontSize: 11, lineHeight: 1.6 }}>
+        <div style={{ textAlign: "center", marginBottom: 6 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>{SHOP.name}</div>
+          <div style={{ fontSize: 9, color: "#7A7870" }}>{SHOP.legal}</div>
         </div>
         <div className="rd" />
-        <div className="rr" style={{ fontWeight: 700 }}><span>{sale.txn_id}</span><span>{new Date(sale.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span></div>
-        {sale.customer_name !== "Walk-in" && <div className="rr"><span>Customer</span><span>{sale.customer_name}</span></div>}
-        {sale.customer_mobile && <div className="rr"><span>Mobile</span><span>{sale.customer_mobile}</span></div>}
-        {sale.customer_email && <div className="rr"><span>Email</span><span>{sale.customer_email}</span></div>}
-        <div className="rr"><span>Payment</span><span>{sale.payment_method}</span></div>
+        <div style={{ textAlign: "center", fontSize: 9, color: "#7A7870", marginBottom: 4 }}>
+          {SHOP.address}<br />{SHOP.phone}
+        </div>
         <div className="rd" />
-        {sale.items?.map((it, i) => <div key={i} className="rr"><span>{it.emoji} {it.name} ×{it.qty}</span><span>{fmt(it.line_total)}</span></div>)}
+        <div className="rr" style={{ fontWeight: 700, fontSize: 10 }}>
+          <span>{sale.txn_id}</span>
+          <span>{new Date(sale.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+        </div>
+        {sale.customer_name !== "Walk-in" && <div className="rr" style={{ fontSize: 11 }}><span>Customer</span><span>{sale.customer_name}</span></div>}
+        {sale.customer_mobile && <div className="rr" style={{ fontSize: 11 }}><span>Mobile</span><span>{sale.customer_mobile}</span></div>}
+        {sale.customer_email && <div className="rr" style={{ fontSize: 11 }}><span>Email</span><span>{sale.customer_email}</span></div>}
+        <div className="rr" style={{ fontSize: 11 }}><span>Payment</span><span>{sale.payment_method}</span></div>
         <div className="rd" />
-        {sale.discount > 0 && <div className="rr" style={{ color: "#C94A3F" }}><span>Discount</span><span>−{fmt(sale.discount)}</span></div>}
-        <div className="rr" style={{ fontWeight: 700, fontSize: 15 }}><span>Total</span><span>{fmt(sale.total)}</span></div>
+        {sale.items?.map((it, i) => (
+          <div key={i} className="rr" style={{ fontSize: 11 }}>
+            <span>{it.emoji} {it.name} ×{it.qty}</span>
+            <span>{fmt(it.line_total)}</span>
+          </div>
+        ))}
         <div className="rd" />
-        <div style={{ textAlign: "center", fontSize: 10, color: "#7A7870" }}>{SHOP.address}</div>
-        <div style={{ textAlign: "center", fontSize: 10, color: "#7A7870" }}>{SHOP.phone}</div>
+        {sale.discount > 0 && <div className="rr" style={{ color: "#C94A3F", fontSize: 11 }}><span>Discount</span><span>−{fmt(sale.discount)}</span></div>}
+        <div className="rr" style={{ fontWeight: 700, fontSize: 14 }}><span>TOTAL</span><span>{fmt(sale.total)}</span></div>
+        <div className="rd" />
+        <div style={{ textAlign: "center", fontSize: 9, color: "#7A7870" }}>Thank you for shopping at {SHOP.name}!</div>
       </div>
+
+      {/* Hint for FunPrint */}
+      <div style={{ background: "#F0EFE9", borderRadius: 8, padding: "10px 12px", marginBottom: 4, fontSize: 11, color: "#7A7870", lineHeight: 1.6 }}>
+        📱 Tap <strong style={{ color: "#1A1917" }}>Share to FunPrint</strong> → opens receipt page → tap Share (↑) in browser → select FunPrint
+      </div>
+
       <div className="mbtns">
         <button className="b-def" onClick={onClose}>Close</button>
-        <button className="b-pri" onClick={handlePrint}>🖨 Print Receipt</button>
+        <button className="b-pri" onClick={handleShareFunPrint}>🖨 Share to FunPrint</button>
       </div>
     </Modal>
   );
