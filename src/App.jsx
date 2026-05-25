@@ -597,16 +597,8 @@ function ReceiptModal({ sale, onClose }) {
   const handleSaveImage = async () => {
     const canvas = generateReceiptCanvas(sale);
     await saveToGallery(canvas);
-    setPrintStatus("✅ Receipt saved to gallery!");
+    setPrintStatus("✅ Invoice saved to gallery!");
     setTimeout(() => setPrintStatus(""), 3000);
-  };
-
-  // Print only — called directly from button tap (required for Bluetooth user gesture)
-  const handlePrintOnly = () => {
-    // Save image in background (no gesture needed)
-    generateReceiptCanvas && saveToGallery(generateReceiptCanvas(sale));
-    // Print via Bluetooth — must be direct from tap
-    printViaBluetooth();
   };
 
   return (
@@ -653,24 +645,26 @@ function ReceiptModal({ sale, onClose }) {
         </div>
       )}
 
-      {/* Action buttons */}
-      <div className="mbtns" style={{ flexDirection: "column", gap: 8 }}>
-        {/* Primary: Print + Save */}
-        <button className="b-pri" onClick={handlePrintOnly} disabled={printing}
-          style={{ width: "100%", padding: 13, borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: printing ? "not-allowed" : "pointer", opacity: printing ? .6 : 1 }}>
-          {printing ? printStatus || "Processing…" : "🖨️ Print & Save to Gallery"}
-        </button>
-
-        {/* Secondary row */}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="b-def" onClick={handleSaveImage} style={{ flex: 1, padding: 10, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-            📥 Save Image Only
+      {/* Action buttons — separate Print and Save */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Print button — Bluetooth direct */}
+          <button className="b-pri" onClick={() => printViaBluetooth()} disabled={printing}
+            style={{ width: "100%", padding: 13, borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: printing ? "not-allowed" : "pointer", opacity: printing ? .6 : 1 }}>
+            {printing ? printStatus || "Connecting…" : "🖨️ Print Receipt"}
           </button>
-          <button className="b-def" onClick={onClose} style={{ flex: 1, padding: 10, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+
+          {/* Save button — image to gallery */}
+          <button className="b-def" onClick={handleSaveImage}
+            style={{ width: "100%", padding: 13, borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+            📥 Save Invoice to Gallery
+          </button>
+
+          {/* Close */}
+          <button className="b-def" onClick={onClose}
+            style={{ width: "100%", padding: 11, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
             Close
           </button>
         </div>
-      </div>
 
       {/* Android tip */}
       <div style={{ marginTop: 8, background: "#F0EFE9", borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#7A7870", lineHeight: 1.6 }}>
