@@ -296,116 +296,288 @@ function CheckoutModal({ cart, cd, onConfirm, onClose, saving }) {
   );
 }
 
+/* ── Receipt Canvas Generator ─────────────────────────────────────────────── */
+function generateReceiptCanvas(sale) {
+  // 58mm at 203dpi = ~464px wide
+  const PX_WIDTH = 464;
+  const FONT_SIZE = 22;
+  const LINE_H = 30;
+  const PADDING = 20;
+  const INNER = PX_WIDTH - PADDING * 2;
+  const CHAR_W = 13; // approx monospace char width at font size 22
+
+  // Build lines
+  const date = new Date(sale.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const lines = [];
+  const add = (text, align = "left", bold = false, size = FONT_SIZE) => lines.push({ text, align, bold, size, type: "text" });
+  const div = () => lines.push({ type: "divider" });
+  const gap = () => lines.push({ type: "gap" });
+
+  add("WHITE EAGLE", "center", true, 28);
+  add("Al Nisr Al Abyad Readymade Garments Trading", "center", false, 18);
+  gap();
+  add("Budaniq Area, Near Megamall, Sharjah UAE", "center", false, 18);
+  add("+971 54 5666 177", "center", false, 18);
+  div();
+  add(sale.txn_id + "   " + date, "center", false, 18);
+  if (sale.customer_name && sale.customer_name !== "Walk-in") add("Customer: " + sale.customer_name, "left", false, 20);
+  if (sale.customer_mobile) add("Mobile: " + sale.customer_mobile, "left", false, 20);
+  add("Payment: " + sale.payment_method, "left", false, 20);
+  div();
+  sale.items?.forEach(it => {
+    const left = it.name + " x" + it.qty;
+    const right = fmt(it.line_total);
+    lines.push({ type: "row", left, right, bold: false, size: FONT_SIZE });
+  });
+  div();
+  if (sale.discount > 0) lines.push({ type: "row", left: "Discount:", right: "-" + fmt(sale.discount), bold: false, size: FONT_SIZE, color: "#C94A3F" });
+  lines.push({ type: "row", left: "TOTAL:", right: fmt(sale.total), bold: true, size: 26 });
+  div();
+  add("Thank you for shopping at WHITE EAGLE!", "center", false, 18);
+  gap(); gap();
+
+  // Calculate total height
+  let totalH = PADDING;
+  lines.forEach(l => {
+    if (l.type === "divider") totalH += 16;
+    else if (l.type === "gap") totalH += 12;
+    else totalH += (l.size || FONT_SIZE) + 10;
+  });
+  totalH += PADDING;
+
+  // Draw on canvas
+  const canvas = document.createElement("canvas");
+  canvas.width = PX_WIDTH;
+  canvas.height = totalH;
+  const ctx = canvas.getContext("2d");
+
+  // White background
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, PX_WIDTH, totalH);
+
+  let y = PADDING;
+  lines.forEach(l => {
+    if (l.type === "divider") {
+      ctx.strokeStyle = "#999";
+      ctx.setLineDash([4, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(PADDING, y + 8);
+      ctx.lineTo(PX_WIDTH - PADDING, y + 8);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      y += 16;
+    } else if (l.type === "gap") {
+      y += 12;
+    } else if (l.type === "row") {
+      const sz = l.size || FONT_SIZE;
+      ctx.font = `${l.bold ? "bold " : ""}${sz}px 'Courier New', monospace`;
+      ctx.fillStyle = l.color || "#000";
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      ctx.fillText(l.left, PADDING, y);
+      ctx.textAlign = "right";
+      ctx.fillText(l.right, PX_WIDTH - PADDING, y);
+      y += sz + 10;
+    } else {
+      const sz = l.size || FONT_SIZE;
+      ctx.font = `${l.bold ? "bold " : ""}${sz}px 'Courier New', monospace`;
+      ctx.fillStyle = "#000";
+      ctx.textBaseline = "top";
+      ctx.textAlign = l.align === "center" ? "center" : "left";
+      const x = l.align === "center" ? PX_WIDTH / 2 : PADDING;
+      // Word wrap for long lines
+      const words = l.text.split(" ");
+      let line = "";
+      let lineY = y;
+      for (let i = 0; i < words.length; i++) {
+        const test = line + (line ? " " : "") + words[i];
+        if (ctx.measureText(test).width > INNER && line) {
+          ctx.fillText(line, x, lineY);
+          lineY += sz + 6;
+          line = words[i];
+        } else line = test;
+      }
+      ctx.fillText(line, x, lineY);
+      y = lineY + sz + 10;
+    }
+  });
+
+  return canvas;
+}
+
 /* ── Receipt Modal ────────────────────────────────────────────────────────── */
 function ReceiptModal({ sale, onClose }) {
   if (!sale) return null;
+  const [printing, setPrinting] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [printStatus, setPrintStatus] = useState("");
 
-  // Build receipt lines for 58mm paper (32 chars wide)
-  const buildReceiptLines = () => {
-    const W = 32;
-    const center = (t) => { const p = Math.max(0, Math.floor((W - t.length) / 2)); return " ".repeat(p) + t; };
-    const row = (l, r) => { const space = Math.max(1, W - l.length - r.length); return l + " ".repeat(space) + r; };
-    const divider = "-".repeat(W);
-    const date = new Date(sale.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-
-    const lines = [
-      center("WHITE EAGLE"),
-      center("Al Nisr Al Abyad Readymade"),
-      center("Garments Trading"),
-      divider,
-      center("Budaniq Area, Near Megamall"),
-      center("Sharjah UAE"),
-      center("+971 54 5666 177"),
-      divider,
-      row(sale.txn_id, date.split(",")[0]),
-      row("Time:", date.split(",")[1]?.trim() || ""),
-      sale.customer_name !== "Walk-in" ? row("Customer:", sale.customer_name) : null,
-      sale.customer_mobile ? row("Mobile:", sale.customer_mobile) : null,
-      row("Payment:", sale.payment_method),
-      divider,
-      ...(sale.items?.map(it => row(`${it.name} x${it.qty}`, fmt(it.line_total))) || []),
-      divider,
-      ...(sale.discount > 0 ? [row("Discount:", "-" + fmt(sale.discount))] : []),
-      row("TOTAL:", fmt(sale.total)),
-      divider,
-      center("Thank you for shopping at"),
-      center("WHITE EAGLE!"),
-      "",
-    ].filter(l => l !== null);
-
-    return lines.join("\n");
+  // Save receipt as image to gallery
+  const saveToGallery = async (canvas) => {
+    try {
+      const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Receipt_${sale.txn_id}_${new Date().toISOString().slice(0,10)}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setSaved(true);
+      return blob;
+    } catch(e) {
+      console.error("Save error:", e);
+    }
   };
 
-  // Open 58mm optimized receipt page — works with FunPrint share
-  const handleShareFunPrint = () => {
-    const receiptText = buildReceiptLines();
-    const w = window.open("", "_blank", "width=320,height=700");
-    w.document.write(`
-      <html>
-      <head>
-        <title>Receipt ${sale.txn_id}</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body {
-            background: #fff;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 16px;
-            font-family: 'Courier New', Courier, monospace;
+  // Direct Bluetooth print via Web Bluetooth API (Android Chrome)
+  const printViaBluetooth = async () => {
+    setPrinting(true);
+    setPrintStatus("🔍 Scanning for printer...");
+    try {
+      // Request Bluetooth device — W234 thermal printer
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ["000018f0-0000-1000-8000-00805f9b34fb", "e7810a71-73ae-499d-8c15-faa9aef0c3f2"]
+      });
+      setPrintStatus("🔗 Connecting...");
+      const server = await device.gatt.connect();
+
+      // Try common thermal printer service UUIDs
+      let characteristic = null;
+      const serviceUUIDs = [
+        "000018f0-0000-1000-8000-00805f9b34fb",
+        "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+        "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+      ];
+      const charUUIDs = [
+        "00002af1-0000-1000-8000-00805f9b34fb",
+        "bef8d6c9-9c21-4c9e-b632-bd58c1009f9f",
+        "49535343-8841-43f4-a8d4-ecbe34729bb3",
+      ];
+
+      for (const sUUID of serviceUUIDs) {
+        try {
+          const service = await server.getPrimaryService(sUUID);
+          for (const cUUID of charUUIDs) {
+            try { characteristic = await service.getCharacteristic(cUUID); break; } catch {}
           }
-          .receipt {
-            width: 220px;
-            font-size: 11px;
-            line-height: 1.5;
-            white-space: pre;
-            color: #000;
-            background: #fff;
-            padding: 8px 4px;
+          if (characteristic) break;
+        } catch {}
+      }
+
+      if (!characteristic) {
+        // Try getting all services
+        const services = await server.getPrimaryServices();
+        for (const svc of services) {
+          const chars = await svc.getCharacteristics();
+          for (const ch of chars) {
+            if (ch.properties.write || ch.properties.writeWithoutResponse) {
+              characteristic = ch; break;
+            }
           }
-          .hint {
-            margin-top: 20px;
-            font-family: sans-serif;
-            font-size: 12px;
-            color: #666;
-            text-align: center;
-            max-width: 280px;
-            line-height: 1.6;
-          }
-          .share-btn {
-            margin-top: 16px;
-            padding: 12px 28px;
-            background: #1A1917;
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            font-family: sans-serif;
-          }
-          @media print {
-            .hint, .share-btn { display: none; }
-            body { padding: 0; }
-            .receipt { width: 58mm; font-size: 10px; }
-            @page { margin: 0; size: 58mm auto; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="receipt" id="receipt">${receiptText}</div>
-        <div class="hint">
-          📱 <strong>To print with FunPrint:</strong><br>
-          Tap the Share button (↑) in your browser<br>
-          → Select <strong>FunPrint</strong> from the list<br>
-          → Print on 58mm roll
-        </div>
-        <button class="share-btn" onclick="window.print()">🖨 Print / Share</button>
-      </body>
-      </html>
-    `);
-    w.document.close();
+          if (characteristic) break;
+        }
+      }
+
+      if (!characteristic) throw new Error("Printer characteristic not found");
+
+      setPrintStatus("🖨️ Printing...");
+
+      // ESC/POS commands for 58mm thermal printer
+      const ESC = 0x1B, GS = 0x1D;
+      const init = new Uint8Array([ESC, 0x40]); // Initialize
+      const centerAlign = new Uint8Array([ESC, 0x61, 0x01]);
+      const leftAlign = new Uint8Array([ESC, 0x61, 0x00]);
+      const boldOn = new Uint8Array([ESC, 0x45, 0x01]);
+      const boldOff = new Uint8Array([ESC, 0x45, 0x00]);
+      const bigText = new Uint8Array([GS, 0x21, 0x11]); // Double width+height
+      const normalText = new Uint8Array([GS, 0x21, 0x00]);
+      const feedCut = new Uint8Array([GS, 0x56, 0x41, 0x10]); // Feed and cut
+      const newLine = new Uint8Array([0x0A]);
+      const divider = new TextEncoder().encode("--------------------------------\n");
+
+      const date = new Date(sale.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+      const write = async (data) => {
+        const CHUNK = 20;
+        for (let i = 0; i < data.length; i += CHUNK) {
+          await characteristic.writeValueWithoutResponse(data.slice(i, i + CHUNK));
+          await new Promise(r => setTimeout(r, 30));
+        }
+      };
+      const txt = (s) => new TextEncoder().encode(s + "\n");
+      const row = (l, r) => {
+        const space = Math.max(1, 32 - l.length - r.length);
+        return new TextEncoder().encode(l + " ".repeat(space) + r + "\n");
+      };
+
+      await write(init);
+      await write(centerAlign);
+      await write(boldOn);
+      await write(bigText);
+      await write(txt("WHITE EAGLE"));
+      await write(normalText);
+      await write(boldOff);
+      await write(txt("Al Nisr Al Abyad"));
+      await write(txt("Readymade Garments Trading"));
+      await write(newLine);
+      await write(txt("Budaniq Area, Near Megamall"));
+      await write(txt("Sharjah UAE"));
+      await write(txt("+971 54 5666 177"));
+      await write(divider);
+      await write(leftAlign);
+      await write(txt(sale.txn_id + "  " + date));
+      if (sale.customer_name && sale.customer_name !== "Walk-in") await write(txt("Customer: " + sale.customer_name));
+      if (sale.customer_mobile) await write(txt("Mobile: " + sale.customer_mobile));
+      await write(txt("Payment: " + sale.payment_method));
+      await write(divider);
+      for (const it of (sale.items || [])) {
+        await write(row(it.name + " x" + it.qty, fmt(it.line_total)));
+      }
+      await write(divider);
+      if (sale.discount > 0) await write(row("Discount:", "-" + fmt(sale.discount)));
+      await write(boldOn);
+      await write(row("TOTAL:", fmt(sale.total)));
+      await write(boldOff);
+      await write(divider);
+      await write(centerAlign);
+      await write(txt("Thank you for shopping"));
+      await write(txt("at WHITE EAGLE!"));
+      await write(newLine);
+      await write(newLine);
+      await write(feedCut);
+
+      device.gatt.disconnect();
+      setPrintStatus("✅ Printed successfully!");
+      setTimeout(() => setPrintStatus(""), 3000);
+    } catch (err) {
+      if (err.name === "NotFoundError") {
+        setPrintStatus("❌ No printer selected");
+      } else if (err.name === "NotSupportedError" || !navigator.bluetooth) {
+        setPrintStatus("⚠️ Use Chrome on Android for direct printing");
+      } else {
+        setPrintStatus("❌ " + err.message);
+      }
+    }
+    setPrinting(false);
+  };
+
+  // Save receipt image to gallery
+  const handleSaveImage = async () => {
+    const canvas = generateReceiptCanvas(sale);
+    await saveToGallery(canvas);
+    setPrintStatus("✅ Receipt saved to gallery!");
+    setTimeout(() => setPrintStatus(""), 3000);
+  };
+
+  // Print + Save together
+  const handlePrintAndSave = async () => {
+    const canvas = generateReceiptCanvas(sale);
+    await saveToGallery(canvas); // save first
+    await printViaBluetooth();   // then print
   };
 
   return (
@@ -415,7 +587,7 @@ function ReceiptModal({ sale, onClose }) {
       {/* Receipt preview */}
       <div className="rbk" style={{ fontFamily: "'Courier New', monospace", fontSize: 11, lineHeight: 1.6 }}>
         <div style={{ textAlign: "center", marginBottom: 6 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, letterSpacing: 1 }}>{SHOP.name}</div>
+          <div style={{ fontWeight: 700, fontSize: 15, letterSpacing: 1 }}>{SHOP.name}</div>
           <div style={{ fontSize: 9, color: "#7A7870" }}>{SHOP.legal}</div>
         </div>
         <div className="rd" />
@@ -445,14 +617,36 @@ function ReceiptModal({ sale, onClose }) {
         <div style={{ textAlign: "center", fontSize: 9, color: "#7A7870" }}>Thank you for shopping at {SHOP.name}!</div>
       </div>
 
-      {/* Hint for FunPrint */}
-      <div style={{ background: "#F0EFE9", borderRadius: 8, padding: "10px 12px", marginBottom: 4, fontSize: 11, color: "#7A7870", lineHeight: 1.6 }}>
-        📱 Tap <strong style={{ color: "#1A1917" }}>Share to FunPrint</strong> → opens receipt page → tap Share (↑) in browser → select FunPrint
+      {/* Status message */}
+      {printStatus && (
+        <div style={{ textAlign: "center", padding: "8px 12px", borderRadius: 8, background: printStatus.includes("✅") ? "#EDFAF1" : printStatus.includes("❌") ? "#FCECEA" : "#F0EFE9", color: printStatus.includes("✅") ? "#3A7D44" : printStatus.includes("❌") ? "#C94A3F" : "#1A1917", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+          {printStatus}
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="mbtns" style={{ flexDirection: "column", gap: 8 }}>
+        {/* Primary: Print + Save */}
+        <button className="b-pri" onClick={handlePrintAndSave} disabled={printing}
+          style={{ width: "100%", padding: 13, borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: printing ? "not-allowed" : "pointer", opacity: printing ? .6 : 1 }}>
+          {printing ? printStatus || "Processing…" : "🖨️ Print & Save to Gallery"}
+        </button>
+
+        {/* Secondary row */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="b-def" onClick={handleSaveImage} style={{ flex: 1, padding: 10, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            📥 Save Image Only
+          </button>
+          <button className="b-def" onClick={onClose} style={{ flex: 1, padding: 10, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            Close
+          </button>
+        </div>
       </div>
 
-      <div className="mbtns">
-        <button className="b-def" onClick={onClose}>Close</button>
-        <button className="b-pri" onClick={handleShareFunPrint}>🖨 Share to FunPrint</button>
+      {/* Android tip */}
+      <div style={{ marginTop: 8, background: "#F0EFE9", borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#7A7870", lineHeight: 1.6 }}>
+        📱 <strong style={{ color: "#1A1917" }}>Android:</strong> Use Chrome browser → tap "Print & Save" → select W234 printer via Bluetooth<br/>
+        🍎 <strong style={{ color: "#1A1917" }}>iPhone:</strong> Tap "Save Image Only" → open FunPrint → print from gallery
       </div>
     </Modal>
   );
