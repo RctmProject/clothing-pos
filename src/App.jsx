@@ -435,14 +435,40 @@ function ReceiptModal({ sale, onClose }) {
   // Direct Bluetooth print via Web Bluetooth API (Android Chrome)
   const printViaBluetooth = async () => {
     setPrinting(true);
-    setPrintStatus("🔍 Scanning for printer...");
+    setPrintStatus("🔍 Connecting to WHITE EAGLE printer...");
     try {
-      // Request Bluetooth device — W234 thermal printer
-      const device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: ["000018f0-0000-1000-8000-00805f9b34fb", "e7810a71-73ae-499d-8c15-faa9aef0c3f2"]
-      });
-      setPrintStatus("🔗 Connecting...");
+      if (!navigator.bluetooth) throw new Error("NotSupportedError");
+
+      // Try to find W234 printer directly (MAC: DC:6A:72:...)
+      // First try with name filters, fallback to all devices
+      let device;
+      try {
+        device = await navigator.bluetooth.requestDevice({
+          filters: [
+            { namePrefix: "W234" },
+            { namePrefix: "MTP" },
+            { namePrefix: "BT" },
+            { namePrefix: "Printer" },
+            { namePrefix: "thermal" },
+          ],
+          optionalServices: [
+            "000018f0-0000-1000-8000-00805f9b34fb",
+            "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+            "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+          ]
+        });
+      } catch {
+        // Fallback: show all devices — user picks DC:6A:72 printer
+        device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [
+            "000018f0-0000-1000-8000-00805f9b34fb",
+            "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+            "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+          ]
+        });
+      }
+      setPrintStatus("🔗 Connecting to " + (device.name || "printer") + "...");
       const server = await device.gatt.connect();
 
       // Try common thermal printer service UUIDs
@@ -554,12 +580,14 @@ function ReceiptModal({ sale, onClose }) {
       setPrintStatus("✅ Printed successfully!");
       setTimeout(() => setPrintStatus(""), 3000);
     } catch (err) {
-      if (err.name === "NotFoundError") {
-        setPrintStatus("❌ No printer selected");
-      } else if (err.name === "NotSupportedError" || !navigator.bluetooth) {
-        setPrintStatus("⚠️ Use Chrome on Android for direct printing");
+      if (err.name === "NotFoundError" || err.name === "AbortError") {
+        setPrintStatus("❌ No printer selected — try again");
+      } else if (err.message === "NotSupportedError" || !navigator.bluetooth) {
+        setPrintStatus("⚠️ Open in Chrome on Android for direct printing");
+      } else if (err.name === "NetworkError" || err.message?.includes("GATT")) {
+        setPrintStatus("❌ Could not connect — make sure printer is ON and nearby");
       } else {
-        setPrintStatus("❌ " + err.message);
+        setPrintStatus("❌ " + (err.message || "Connection failed — try again"));
       }
     }
     setPrinting(false);
