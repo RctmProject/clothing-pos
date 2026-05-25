@@ -651,11 +651,16 @@ function ReceiptModal({ sale, onClose }) {
 
       {/* Action buttons — separate Print and Save */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {/* Print button — Bluetooth direct */}
-          <button className="b-pri" onClick={() => printViaBluetooth()} disabled={printing}
-            style={{ width: "100%", padding: 13, borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: printing ? "not-allowed" : "pointer", opacity: printing ? .6 : 1 }}>
-            {printing ? printStatus || "Connecting…" : "🖨️ Print Receipt"}
-          </button>
+          {/* Print button — uses native ref to bypass React synthetic event for Web Bluetooth */}
+          <div ref={el => {
+            if (el && !el._bound) {
+              el._bound = true;
+              el.addEventListener("click", () => printViaBluetooth());
+            }
+          }} role="button" tabIndex={0}
+            style={{ width: "100%", padding: 13, borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", background: "#1A1917", color: "#fff", textAlign: "center", userSelect: "none" }}>
+            🖨️ Print Receipt
+          </div>
 
           {/* Save button — image to gallery */}
           <button className="b-def" onClick={handleSaveImage}
@@ -672,8 +677,8 @@ function ReceiptModal({ sale, onClose }) {
 
       {/* Android tip */}
       <div style={{ marginTop: 8, background: "#F0EFE9", borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#7A7870", lineHeight: 1.6 }}>
-        📱 <strong style={{ color: "#1A1917" }}>Android:</strong> Use Chrome browser → tap "Print & Save" → select W234 printer via Bluetooth<br/>
-        🍎 <strong style={{ color: "#1A1917" }}>iPhone:</strong> Tap "Save Image Only" → open FunPrint → print from gallery
+        📱 <strong style={{ color: "#1A1917" }}>Android Chrome:</strong> Tap "Print Receipt" → select MX10 printer<br/>
+        🍎 <strong style={{ color: "#1A1917" }}>iPhone:</strong> Tap "Save Invoice to Gallery" → open FunPrint → print
       </div>
     </Modal>
   );
