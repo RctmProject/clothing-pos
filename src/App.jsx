@@ -601,11 +601,12 @@ function ReceiptModal({ sale, onClose }) {
     setTimeout(() => setPrintStatus(""), 3000);
   };
 
-  // Print + Save together
-  const handlePrintAndSave = async () => {
-    const canvas = generateReceiptCanvas(sale);
-    await saveToGallery(canvas); // save first
-    await printViaBluetooth();   // then print
+  // Print only — called directly from button tap (required for Bluetooth user gesture)
+  const handlePrintOnly = () => {
+    // Save image in background (no gesture needed)
+    generateReceiptCanvas && saveToGallery(generateReceiptCanvas(sale));
+    // Print via Bluetooth — must be direct from tap
+    printViaBluetooth();
   };
 
   return (
@@ -655,7 +656,7 @@ function ReceiptModal({ sale, onClose }) {
       {/* Action buttons */}
       <div className="mbtns" style={{ flexDirection: "column", gap: 8 }}>
         {/* Primary: Print + Save */}
-        <button className="b-pri" onClick={handlePrintAndSave} disabled={printing}
+        <button className="b-pri" onClick={handlePrintOnly} disabled={printing}
           style={{ width: "100%", padding: 13, borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: printing ? "not-allowed" : "pointer", opacity: printing ? .6 : 1 }}>
           {printing ? printStatus || "Processing…" : "🖨️ Print & Save to Gallery"}
         </button>
