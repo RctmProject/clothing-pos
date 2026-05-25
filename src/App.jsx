@@ -432,97 +432,169 @@ function ReceiptModal({ sale, onClose }) {
     }
   };
 
-  // Print receipt — opens optimized 58mm print window
-  // Works on Android Chrome: tap Print → select W234 via system print dialog
-  const printViaBluetooth = () => {
-    const date = new Date(sale.created_at).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-    const itemsHtml = (sale.items || []).map(it =>
-      `<div class="row"><span>${it.name} x${it.qty}</span><span>${fmt(it.line_total)}</span></div>`
-    ).join("");
+  // Direct Bluetooth print via Web Bluetooth API (Android Chrome)
+  // Printer: MX10 — MAC: 28:03:08:59:0A:40
+  const printViaBluetooth = async () => {
+    setPrinting(true);
+    setPrintStatus("🔍 Connecting to MX10 printer...");
+    try {
+      if (!navigator.bluetooth) {
+        setPrintStatus("⚠️ Open in Chrome on Android for direct printing");
+        setPrinting(false);
+        return;
+      }
 
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width">
-<title>Receipt ${sale.txn_id}</title>
-<style>
-  @page { size: 58mm auto; margin: 2mm; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 10pt;
-    width: 54mm;
-    color: #000;
-    background: #fff;
-    padding: 2mm;
-  }
-  .center { text-align: center; }
-  .bold { font-weight: bold; }
-  .big { font-size: 14pt; font-weight: bold; letter-spacing: 1px; }
-  .small { font-size: 8pt; }
-  .divider { border-top: 1px dashed #000; margin: 3mm 0; }
-  .row { display: flex; justify-content: space-between; margin-bottom: 1.5mm; font-size: 9pt; }
-  .total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: 11pt; margin-top: 2mm; }
-  .spacer { height: 3mm; }
-  .no-print { display: none; }
-  @media screen {
-    body { width: 320px; margin: 0 auto; padding: 16px; background: #f5f5f5; }
-    .receipt-wrap { background: #fff; padding: 12px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
-    .no-print { display: block; text-align: center; margin-top: 16px; }
-    .print-btn {
-      padding: 12px 32px; background: #1A1917; color: #fff;
-      border: none; border-radius: 8px; font-size: 14px;
-      font-weight: bold; cursor: pointer; font-family: sans-serif;
-    }
-    .hint { font-family: sans-serif; font-size: 12px; color: #666; margin-top: 10px; line-height: 1.6; }
-  }
-</style>
-</head>
-<body>
-<div class="receipt-wrap">
-  <div class="center big">WHITE EAGLE</div>
-  <div class="center small">Al Nisr Al Abyad Readymade Garments Trading</div>
-  <div class="spacer"></div>
-  <div class="center small">Budaniq Area, Near Megamall, Sharjah UAE</div>
-  <div class="center small">+971 54 5666 177</div>
-  <div class="divider"></div>
-  <div class="row"><span>${sale.txn_id}</span><span>${date}</span></div>
-  ${sale.customer_name && sale.customer_name !== "Walk-in" ? `<div class="row"><span>Customer:</span><span>${sale.customer_name}</span></div>` : ""}
-  ${sale.customer_mobile ? `<div class="row"><span>Mobile:</span><span>${sale.customer_mobile}</span></div>` : ""}
-  <div class="row"><span>Payment:</span><span>${sale.payment_method}</span></div>
-  <div class="divider"></div>
-  ${itemsHtml}
-  <div class="divider"></div>
-  ${sale.discount > 0 ? `<div class="row" style="color:#C94A3F"><span>Discount:</span><span>-${fmt(sale.discount)}</span></div>` : ""}
-  <div class="total-row"><span>TOTAL:</span><span>${fmt(sale.total)}</span></div>
-  <div class="divider"></div>
-  <div class="center small">Thank you for shopping at WHITE EAGLE!</div>
-  <div class="spacer"></div>
-</div>
-<div class="no-print">
-  <button class="print-btn" onclick="window.print()">🖨️ Print Now</button>
-  <div class="hint">
-    On Android: tap Print Now → select your W234 printer<br>
-    Make sure printer Bluetooth is ON
-  </div>
-</div>
-<script>
-  // Auto-trigger print on Android
-  window.onload = function() {
-    setTimeout(function() { window.print(); }, 500);
-  };
-</script>
-</body>
-</html>`;
+      // Request MX10 printer by name
+      let device;
+      try {
+        device = await navigator.bluetooth.requestDevice({
+          filters: [
+            { name: "MX10" },
+            { namePrefix: "MX" },
+          ],
+          optionalServices: [
+            "000018f0-0000-1000-8000-00805f9b34fb",
+            "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+            "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+            "0000ff00-0000-1000-8000-00805f9b34fb",
+          ]
+        });
+      } catch {
+        // Fallback: show all devices
+        device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: [
+            "000018f0-0000-1000-8000-00805f9b34fb",
+            "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+            "49535343-fe7d-4ae5-8fa9-9fafd205e455",
+            "0000ff00-0000-1000-8000-00805f9b34fb",
+          ]
+        });
+      }
 
-    const w = window.open("", "_blank");
-    if (w) {
-      w.document.write(html);
-      w.document.close();
-    } else {
-      setPrintStatus("⚠️ Allow popups for this site and try again");
+      setPrintStatus("🔗 Connecting to " + (device.name || "MX10") + "...");
+      const server = await device.gatt.connect();
+      setPrintStatus("🔎 Finding print service...");
+
+      // Get all services and find writable characteristic
+      let characteristic = null;
+      const services = await server.getPrimaryServices();
+
+      for (const svc of services) {
+        try {
+          const chars = await svc.getCharacteristics();
+          for (const ch of chars) {
+            if (ch.properties.writeWithoutResponse || ch.properties.write) {
+              characteristic = ch;
+              break;
+            }
+          }
+          if (characteristic) break;
+        } catch {}
+      }
+
+      if (!characteristic) throw new Error("Could not find print service on MX10");
+
+      setPrintStatus("🖨️ Sending receipt to printer...");
+
+      // ESC/POS commands
+      const ESC = 0x1B, GS = 0x1D;
+      const enc = new TextEncoder();
+      const date = new Date(sale.created_at).toLocaleString("en-GB", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit"
+      });
+
+      const write = async (data) => {
+        const CHUNK = 20;
+        for (let i = 0; i < data.length; i += CHUNK) {
+          const chunk = data.slice(i, i + CHUNK);
+          try {
+            await characteristic.writeValueWithoutResponse(chunk);
+          } catch {
+            await characteristic.writeValue(chunk);
+          }
+          await new Promise(r => setTimeout(r, 40));
+        }
+      };
+
+      const txt = (s) => enc.encode(s + "\n");
+      const row = (l, r) => {
+        const space = Math.max(1, 32 - l.length - r.length);
+        return enc.encode(l + " ".repeat(space) + r + "\n");
+      };
+      const div = () => enc.encode("--------------------------------\n");
+
+      // Initialize printer
+      await write(new Uint8Array([ESC, 0x40]));
+      await new Promise(r => setTimeout(r, 200));
+
+      // Center align
+      await write(new Uint8Array([ESC, 0x61, 0x01]));
+      // Bold + double size for shop name
+      await write(new Uint8Array([ESC, 0x45, 0x01, GS, 0x21, 0x11]));
+      await write(txt("WHITE EAGLE"));
+      // Normal size
+      await write(new Uint8Array([GS, 0x21, 0x00, ESC, 0x45, 0x00]));
+      await write(txt("Al Nisr Al Abyad"));
+      await write(txt("Readymade Garments Trading"));
+      await write(txt(""));
+      await write(txt("Budaniq Area, Near Megamall"));
+      await write(txt("Sharjah UAE"));
+      await write(txt("+971 54 5666 177"));
+      await write(div());
+
+      // Left align
+      await write(new Uint8Array([ESC, 0x61, 0x00]));
+      await write(txt(sale.txn_id + "  " + date));
+      if (sale.customer_name && sale.customer_name !== "Walk-in")
+        await write(txt("Customer: " + sale.customer_name));
+      if (sale.customer_mobile)
+        await write(txt("Mobile: " + sale.customer_mobile));
+      await write(txt("Payment: " + sale.payment_method));
+      await write(div());
+
+      for (const it of (sale.items || [])) {
+        await write(row(it.name + " x" + it.qty, fmt(it.line_total)));
+      }
+      await write(div());
+
+      if (sale.discount > 0)
+        await write(row("Discount:", "-" + fmt(sale.discount)));
+
+      // Bold for total
+      await write(new Uint8Array([ESC, 0x45, 0x01]));
+      await write(row("TOTAL:", fmt(sale.total)));
+      await write(new Uint8Array([ESC, 0x45, 0x00]));
+      await write(div());
+
+      // Center for footer
+      await write(new Uint8Array([ESC, 0x61, 0x01]));
+      await write(txt("Thank you for shopping"));
+      await write(txt("at WHITE EAGLE!"));
+      await write(txt(""));
+      await write(txt(""));
+
+      // Feed and cut
+      await write(new Uint8Array([GS, 0x56, 0x41, 0x10]));
+
+      device.gatt.disconnect();
+      setPrintStatus("✅ Printed successfully!");
+      setTimeout(() => setPrintStatus(""), 3000);
+
+    } catch (err) {
+      if (err.name === "NotFoundError" || err.name === "AbortError") {
+        setPrintStatus("❌ No printer selected — try again");
+      } else if (err.name === "NotSupportedError") {
+        setPrintStatus("⚠️ Use Chrome on Android for direct printing");
+      } else if (err.message?.includes("GATT") || err.name === "NetworkError") {
+        setPrintStatus("❌ Printer disconnected — make sure MX10 is ON");
+      } else {
+        setPrintStatus("❌ " + (err.message || "Connection failed"));
+      }
+      setPrinting(false);
     }
+    setPrinting(false);
   };
 
   // Save receipt image to gallery
